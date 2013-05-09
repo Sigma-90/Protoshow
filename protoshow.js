@@ -11,8 +11,6 @@
  *
  *--------------------------------------------------------------------------*/
 
-
-
 if(typeof Prototype=='undefined' || typeof Scriptaculous =='undefined') {
 	throw("Protoshow.js requires the Prototype & Scriptaculous JavaScript frameworks");
 } else {
@@ -43,11 +41,11 @@ var protoShow = Class.create({
 			keyboardControls	: true,
 			fireEvents			: true,
 			progressTimer		: true,
-			swipeEvents			: true
+			swipeEvents			: true,
+			progressBarOption   : false,
+			resizeMobile        : false
 			
 		}, options || {}); // We use Prototype's Object.extend() to overwrite defaults with user preferences 
-
-		
 
 
 		// get/set various options
@@ -69,7 +67,9 @@ var protoShow = Class.create({
 		this.progressTimer		=	this.options.progressTimer;
 		this.showUniqueID		=	element;		// get a unique ID based on the id attr of the show element
 		
-
+		this.progressBarOption	= 	this.options.progressBarOption;	
+		this.resizeMobile   	= 	this.options.resizeMobile;	
+		
 
 
 		// define variables before use
@@ -83,6 +83,21 @@ var protoShow = Class.create({
 		this.currentSlideEle	=	this.slides[this.currentSlideID];
 		this.nextSlideEle		=	this.slides[this.nextSlideID];
 
+		
+		if (this.options.progressBarOption) {
+			this.progress_bar = new Control.ProgressBar('progress_bar',{  
+			    interval: 0.15  
+			}); 
+		}		
+		
+
+		if (this.options.resizeMobile) {
+			hammertime = Hammer(document.getElementById("slideImageGradient2"));
+		} else {
+			hammertime = Hammer(document.getElementById("slideImageGradient"));
+		}	
+		
+		
 
 		//run some initial setup
 		this.setupTransitions(this.options.transitionType);
@@ -99,6 +114,7 @@ var protoShow = Class.create({
 
 		// let's get things going!				
 		this.play();
+		
 		
 	},
 
@@ -117,6 +133,7 @@ var protoShow = Class.create({
 		this.updateControls(true);	
 		
 		this.fireCustomEvent("protoShow:started");
+		
 	},
 
 	stop: function() {
@@ -129,23 +146,39 @@ var protoShow = Class.create({
 		this.updateControls(false);
 		
 		this.fireCustomEvent("protoShow:stopped");
+		
 	},
 
 	toggleMasterTimer: function(bln) {
 		var _this = this;
-	
+		
 		if (bln) {
+			
 			// Check if custom interval has been defined by user as data attribute in HTML
 			var slideInterval = (this.slideIntervals[this.currentSlideID]) ? this.slideIntervals[this.currentSlideID] : this.interval;
 			this.runProgressTimer();	
+			
+			
+			if (this.options.progressBarOption) {
+				this.runProgressBar();
+			}			
 			
 			// Set Master time which controls progress of show			
 			this.masterTimer	=	new PeriodicalExecuter(function(pe) {
 			  	_this.mode();		    
 			}, slideInterval/1000);
+			
+
+
+			
 			this.loopCount++;
 		} else {
 			this.stopProgressTimer();
+			
+			if (this.options.progressBarOption) {
+				this.stopProgressBar();
+			}			
+			
 			_this.masterTimer && _this.masterTimer.stop();
 			_this.masterTimer = null;
 		}
@@ -156,12 +189,21 @@ var protoShow = Class.create({
 		// Role: Runs slideshow "forwards"
 		
 		this.goMaster( this.currentSlideID + 1, transTime, "forward");
+		
+		if (this.options.progressBarOption) {
+			this.resetProgressBar();
+		}		
+		
 	},
 
 	backward: function(transTime) {
 		// Role: Runs slideshow "backwards"
 				
 		this.goMaster( this.currentSlideID - 1, transTime, "backward");	
+		
+		if (this.options.progressBarOption) {
+			this.resetProgressBar();
+		}		
 	},
 
 	next: function() {
@@ -177,12 +219,19 @@ var protoShow = Class.create({
 			return false;
 		}
 		this.goMaster( slide, this.manTransitionTime );	
+		
+		if (this.options.progressBarOption) {
+			this.resetProgressBar();
+		}		
 	},
+	
 
 	goMaster: function(next,transTime, direction) {
 		// Role: Master function - controls delegation of slide swapping	
 		
 		var _this = this;
+		
+		
 
 		// First thing's first, we hault the show whatever the circumstances
 		this.toggleMasterTimer(false); 
@@ -194,13 +243,21 @@ var protoShow = Class.create({
 		// Set the transistion speed to transTime arg (if set) else fallback to standard transitionTime
 		var transTime = (transTime) ? transTime : _this.transitionTime;
 
-		
-
 		this.toggleAnimating(true);		
 		this.setNextIndex(next);  // set this.nextSlideID correctly		
 		
+		
 		this.fireCustomEvent("protoShow:transitionStarted",transTime,direction,_this.nextSlideID);
 		_this.updateNavigation(_this.currentSlideID, _this.nextSlideID);
+
+		
+		if (this.options.progressBarOption) {
+			var progressBarBG = _this.nextSlideEle.down('img').readAttribute('src');
+			
+			$(progress_bar).down('div').setStyle({
+			  background: 'url('+progressBarBG+') right bottom no-repeat #fff',
+			});
+		}		
 
 		this.transitionType(this.currentSlideEle,this.nextSlideEle, {
 			transitionTime		:   transTime,
@@ -219,9 +276,11 @@ var protoShow = Class.create({
 					// if we're autoplaying and we're not explicity stopped
 					// otherwise show Master Timer is not permitted to restart itself
 					_this.toggleMasterTimer(true);	
-				}				
+				}	
+							
 			}
 		});		
+		
 	},
 
 
@@ -262,6 +321,12 @@ var protoShow = Class.create({
 		});
 	},
 
+	cycle: function(current,next,opts) {
+		// Role: Transition function
+		// Type: Cyclic Slider - cycles slides across the screen
+		// This part is no different from slide, so we might as well call it:
+		this.slide(current,next,opts);
+	},
 	
 
 	/* SETUP METHODS
@@ -276,7 +341,7 @@ var protoShow = Class.create({
 		this.slides.each(function(e, index) {	
 			
 
-			if (_this.options.transitionType !== "slide") {
+			if (_this.options.transitionType !== "slide" && _this.options.transitionType !== "cycle") {
 				e.hide();		
 			}
 			var slideInt = e.readAttribute('data-slide-interval');			
@@ -301,7 +366,7 @@ var protoShow = Class.create({
 			this.transitionType		=	this[transType];			
 			this.element.addClassName('transition-' + transType);
 			
-			if (transType === "slide") {
+			if (transType === "slide" || transType === "cycle") {
 
 				this.showWindow 	=	this.element.down('.show').wrap('div', { 'class': 'show-window' });
 				this.showEle		=	this.showWindow.down('.show');
@@ -332,7 +397,7 @@ var protoShow = Class.create({
 		if (typeof this.protoControls==="undefined" ) {
 
 			var controlsEle		 =	new Element('ol', { 'class': 'proto-controls'});
-			var controlsTemplate = 	new Template('<li class="#{htmlclass}"><a href="javascript:void(0)" title="#{title}">#{text}</a></li>');
+			var controlsTemplate = 	new Template('<li class="#{htmlclass}"><a href="javascript:void(0)" title="#{title}"><span>#{text}</span></a></li>');
 			
 			var startStop		 = 	controlsTemplate.evaluate({
 										htmlclass: "proto-control start-stop",
@@ -400,12 +465,14 @@ var protoShow = Class.create({
 		// Role: Setup Navigation
 		var _this = this;
 		
+		
 		if (!this.options.navigation) {
 			return false;
 		}
 
-		this.protoNavigation	=  this.element.down('.proto-navigation');    
-
+		this.protoNavigation	=  this.element.down('.proto-navigation');  
+		
+		
 		if (typeof this.protoNavigation==="undefined" ) {
 			var navEle		=	new Element('ol', { 'class': 'proto-navigation'});			
 			var navTemplate = 	new Template('<li><a href="##{number}" title="Skip to Slide #{number}">#{number}</a></li>');
@@ -416,16 +483,20 @@ var protoShow = Class.create({
 			});
 
 			this.element.insert(navEle,'bottom');
-			this.protoNavigation	=  this.element.down('.proto-navigation');			
+			this.protoNavigation	=  this.element.down('.proto-navigation');	
+			
 		}
 
 		this.protoNavigation.down('li').addClassName('current-slide');
+		
 
 		// define "lock" variable to stop abuse of controls
 		var handlingClick	= false;
 		
 		this.protoNavigation.on("click", "a", function(event, element) {
 			event.stop();
+			
+			
 
 			// make sure we're not processing multiple click events 
 			if (handlingClick) {
@@ -436,16 +507,25 @@ var protoShow = Class.create({
 		
 			var index = element.hash.substr(1,2);	// get the slide ID from the href hash (eg: #3)
 			_this.gotoSlide(index-1);
-
+			
 			/*remove the "lock" variable*/
 			handlingClick = false;
 		});
+		
+		
+		
+		
 	},
 
 	updateNavigation: function(current,next) {
 		if (typeof this.protoNavigation !== "undefined" ) {
-			this.protoNavigation.select('li')[current].removeClassName('current-slide');
-			this.protoNavigation.select('li')[next].addClassName('current-slide');
+			if (this.options.transitionType !== "cycle"){
+				this.protoNavigation.select('li')[current].removeClassName('current-slide');
+				this.protoNavigation.select('li')[next].addClassName('current-slide');
+			}else{
+				this.protoNavigation.select('li.current-slide')[0].removeClassName('current-slide');
+				this.protoNavigation.select('li a[href="#'+(next+1)+'"]')[0].up().addClassName('current-slide');
+			}
 		}
 	},
 
@@ -486,12 +566,22 @@ var protoShow = Class.create({
 		if (this.options.pauseOnHover) {						
 			this.element.down('.show').observe('mouseenter',function() {
 				_this.stop();
+				
+			    $$('ul.show li.active-slide img.overlay').each(function(s) {
+			        s.addClassName('show');
+			    });	
+				
 			}).observe('mouseleave',function() {								
-				_this.play();					
+				_this.play();	
+				
+				//hide overlay
+			    $$('ul.show li.active-slide img.overlay').each(function(s) {
+					s.removeClassName('show');         
+			    });					
 			});
 
-			
 		}
+		
 	},
 
 	setupKeyboardControls: function() {
@@ -540,11 +630,21 @@ var protoShow = Class.create({
 		this.element.observe('touchmove', function(e) {	
 			e.preventDefault();		
 			if (touchStartX > e.targetTouches[0].clientX) {
-				_this.previous();
-			} else {
 				_this.next();
+			} else {
+				_this.previous();
 			}
 		});	
+		 
+		  
+		hammertime.on("dragleft dragright", function(ev) {
+	        if (ev.type=='dragright'){
+	        	_this.previous();
+	        }
+	        if (ev.type=='dragleft'){
+	        	_this.next();
+	        }	 
+	    });	
 				
 	},
 
@@ -583,7 +683,36 @@ var protoShow = Class.create({
 			this.element.removeClassName("animating");
 		}
 	},
-
+	
+	moveSlides: function(forward) {
+		var slideToMove = forward ? this.slides.shift() : this.slides.pop();
+		if(forward){			
+			var slidesContainer = slideToMove.parentNode;
+			var otherSlides = slideToMove.nextSiblings();			
+			slideToMove.remove();
+			slidesContainer.insertBefore(slideToMove, otherSlides[otherSlides.length-1].nextSibling);
+			this.slides.push(slideToMove);
+			if (typeof this.protoNavigation !== "undefined" ) {
+				var navList = this.protoNavigation.select('li');
+				var navToMove = navList[navList.length-1];
+				navToMove.remove();
+				this.protoNavigation.insertBefore(navToMove, navList[0]);
+			}
+		}else{
+			var slidesContainer = slideToMove.parentNode; 
+			var otherSlides = slideToMove.previousSiblings();
+			slideToMove.remove();
+			slidesContainer.insertBefore(slideToMove, otherSlides[otherSlides.length-1]);
+			this.slides.unshift(slideToMove);
+			if (typeof this.protoNavigation !== "undefined" ) {
+				var navList = this.protoNavigation.select('li');
+				var navToMove = navList[0];
+				navToMove.remove();
+				this.protoNavigation.insertBefore(navToMove, navList[navList.length-1].nextSibling);
+			}
+		}
+	},
+	
 	setNextIndex: function(next) {
 		// Role: Decides on direction and ensures within bounds
 		
@@ -593,9 +722,25 @@ var protoShow = Class.create({
 		
 		// Ensure we're within bounds
 		if (next >= this.slidesLength) {
-			next = 0;
+			if (this.options.transitionType === "cycle"){
+				this.moveSlides(true);
+				this.currentSlideID = this.currentSlideID-1;
+				next = this.slidesLength-1;
+				var lPos = this.slideWidth * this.currentSlideID; 
+				this.showEle.setStyle({'left': -lPos + 'px'});
+			}else{
+				next = 0;
+			}
 		} else if (next < 0 ){
-			next = this.slidesLength-1;
+			if (this.options.transitionType === "cycle"){
+				this.moveSlides(false);
+				this.currentSlideID = 1;
+				next = 0;
+				var lPos = this.slideWidth; 
+				this.showEle.setStyle({'left': -lPos + 'px'});
+			}else{
+				next = this.slidesLength-1;
+			}
 		}
 
 		this.nextSlideID = next;	
@@ -639,12 +784,10 @@ var protoShow = Class.create({
 		// Role: runs & controls the animation of the "progress timer" 
 		
 		var _this = this;
-		
-		
+				
 		if (this.progressTimer) {	// if user has set to use progress timer and the browser supports <canvas>
 
-			
-			
+						
 			this.progressTimerEle.show();			
 			
 			// use Epoch time to ensure code executes in time specified
@@ -688,7 +831,8 @@ var protoShow = Class.create({
 	
 	stopProgressTimer: function() {			
 		this.resetProgressTimer();		
-		clearInterval(this.progressTimerPE);						
+		clearInterval(this.progressTimerPE);		
+		
 	},
 	
 	drawArc: function(canvasCtx,startAngle,endAngle,strokeStyle) {	
@@ -706,7 +850,24 @@ var protoShow = Class.create({
 		ctx.stroke();	
 		var drawingArc = false;			
 	},
-
+	runProgressBar: function() {		
+		var _this = this;
+		this.progress_bar.start(progress_bar);
+		this.progress_bar.reset(progress_bar);
+		//console.log('1 start progress bar');
+	},
+	resetProgressBar: function() {		
+		var _this = this;
+		this.progress_bar.reset(progress_bar); 
+		
+		//console.log('3 reset progress bar');
+	},	
+	stopProgressBar: function() {		
+		var _this = this;
+		this.progress_bar.stop(progress_bar); 
+		
+		//console.log('2 stop progress bar');
+	},
 	
 	
 	/* LOGGING FUNCTIONS
@@ -740,7 +901,4 @@ Element.addMethods({
 });
 
 }
-
-
-
 
